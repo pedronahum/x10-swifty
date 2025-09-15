@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Seed initial issues using GitHub CLI.
 # Usage:
-#   export REPO=youruser/x10-swifty
+#   export REPO=pedronahum/x10-swifty
 #   ./scripts/seed_issues.sh
-
 set -euo pipefail
-
 : "${REPO:?Set REPO to owner/name}"
+
+# Ensure label exists
+gh label create backlog --repo "$REPO" --color BFDADC --description "Planned items" 2>/dev/null || true
 
 create() {
   local title="$1"
@@ -16,7 +17,7 @@ create() {
 
 create "Backend protocol skeleton" $'**Goal**: Define `Backend` with compile/execute/buffers/collectives/streams/events.\n**Acceptance**:\n- Types compile.\n- PJRT and IREE stubs conform.\n'
 create "Device & Tensor façade" $'**Goal**: Implement `Device` and `Tensor<Scalar>` with shape + device.\n**Acceptance**:\n- Example builds and prints tensor.\n'
-create "Barrier semantics (`materialize()`)" $'**Goal**: Async barrier analogous to `LazyTensorBarrier()`.\n**Acceptance**:\n- Example awaits materialize successfully.\n'
+create "Barrier semantics (`materialize()`)" $'**Goal**: Async barrier analogous to `LazyTensorBarrier()`.\n**Acceptance**:\n- Example awaits `materialize()` successfully.\n'
 create "StableHLO builder stub" $'**Goal**: `IRBuilder` returning a placeholder module; add unit tests.\n**Acceptance**:\n- Golden text dump test.\n'
 create "PJRT backend shim" $'**Goal**: In-tree backend with stub methods; future C-API hooks.\n**Acceptance**:\n- Builds on macOS/Linux.\n'
 create "IREE backend placeholder" $'**Goal**: Mirror PJRT structure; no core changes required.\n**Acceptance**:\n- Builds; no runtime behavior.\n'
