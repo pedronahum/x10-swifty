@@ -1,0 +1,7 @@
+# SwiftPM / Xcode
+.build/
+.DS_Store
+DerivedData/
+.xcworkspace/
+# SwiftPM resolution files
+Package.resolved
