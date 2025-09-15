@@ -17,6 +17,8 @@ let package = Package(
   ],
   dependencies: [
     // Macro package intentionally omitted in the bootstrap to avoid toolchain pinning.
+    .package(url: "https://github.com/swiftlang/swift-testing", branch: "main"),
+
   ],
   targets: [
     .target(
@@ -42,6 +44,24 @@ let package = Package(
       name: "x10AdaptersTFEager",
       dependencies: ["x10Core", "x10Runtime"],
       path: "Sources/x10Adapters/TFEager"),
+      .testTarget(
+  name: "x10CoreTests",
+  dependencies: [
+    "x10Core",
+    .product(name: "Testing", package: "swift-testing"),
+  ],
+  path: "Tests/x10CoreTests"
+),
+.testTarget(
+  name: "x10RuntimeTests",
+  dependencies: [
+    "x10Core",
+    "x10Runtime",
+    .product(name: "Testing", package: "swift-testing"),
+  ],
+  path: "Tests/x10RuntimeTests"
+),
+
     .executableTarget(
       name: "x10ExampleBasics",
       dependencies: ["x10Core", "x10Runtime"],
