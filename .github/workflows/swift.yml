@@ -37,7 +37,7 @@ jobs:
           if [ "$RUNNER_OS" = "macOS" ]; then
             xcrun --toolchain ${{ env.TOOLCHAINS }} swift build -v
           else
-            swift build -v
+            swift build 
           fi
 
       - name: Test
@@ -45,7 +45,7 @@ jobs:
           if [ "$RUNNER_OS" = "macOS" ]; then
             xcrun --toolchain ${{ env.TOOLCHAINS }} swift test -v
           else
-            swift test -v
+            swift test 
           fi
 
       - name: Run example

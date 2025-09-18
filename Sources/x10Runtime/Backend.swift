@@ -1,15 +1,62 @@
 import Foundation
 import x10Core 
 
+
+// === Core backend surface types ===
+
+/// Opaque handle to device-resident memory.
 public protocol Buffer: Sendable {}
 
+/// Collective reduction operation kinds (extend as needed).
+public enum ReduceOp: Sendable { case sum, max, min }
+
+/// Communicator / device group descriptor for collectives.
+public struct CollectiveGroup: Sendable { public init() {} }
+
+// If you don't already have these in this file, keep them here:
+public struct Stream: Sendable { public init() {} }
+public struct Event: Sendable { public init() {} }
+
+/// Options that influence backend compilation (stable shape of API).
+public struct CompileOptions: Sendable {
+  /// Preferred device for the compiled program (nil ⇒ backend default).
+  public var device: Device?
+
+  /// Numeric precision policy (activations / matmul / accumulators).
+  public var precision: PrecisionPolicy
+
+  /// Emit IR/text dumps useful for debugging.
+  public var debugIR: Bool
+
+  /// Enable backend profiling if supported.
+  public var enableProfiling: Bool
+
+  /// Extra backend-specific flags (stringly-typed; stable escape hatch).
+  public var flags: [String: String]
+
+  public init(
+    device: Device? = nil,
+    precision: PrecisionPolicy = .init(),
+    debugIR: Bool = false,
+    enableProfiling: Bool = false,
+    flags: [String: String] = [:]
+  ) {
+    self.device = device
+    self.precision = precision
+    self.debugIR = debugIR
+    self.enableProfiling = enableProfiling
+    self.flags = flags
+  }
+}
+
+/// Backends implement compile/execute and (optionally) collectives.
 public protocol Backend: Sendable {
-  associatedtype DeviceId: Hashable & Sendable
+  associatedtype Dev: Hashable & Sendable
 
-  func devices() throws -> [DeviceId]
+  func devices() throws -> [Dev]
 
-  func allocate(shape: [Int], dtype: DType, on: DeviceId) throws -> Buffer
-  func toDevice(_ host: UnsafeRawBufferPointer, shape: [Int], dtype: DType, on: DeviceId) throws -> Buffer
+  func allocate(shape: [Int], dtype: DType, on: Dev) throws -> Buffer
+  func toDevice(_ host: UnsafeRawBufferPointer, shape: [Int], dtype: DType, on: Dev) throws -> Buffer
   func fromDevice(_ buffer: Buffer) throws -> [UInt8]
 
   func compile(stablehlo: StableHLOModule, options: CompileOptions) throws -> Executable
@@ -17,18 +64,6 @@ public protocol Backend: Sendable {
 
   func allReduce(_ b: Buffer, op: ReduceOp, group: CollectiveGroup) async throws -> Buffer
 
-  func stream(device: DeviceId) throws -> Stream
-  func event(device: DeviceId) throws -> Event
-}
-
-public struct CompileOptions: Sendable {
-  public init() {}
-}
-
-public struct Stream: Sendable { public init() {} }
-public struct Event: Sendable { public init() {} }
-
-public enum ReduceOp { case add, max }
-public struct CollectiveGroup: Sendable {
-  public init() {}
+  func stream(device: Dev) throws -> Stream
+  func event(device: Dev) throws -> Event
 }
