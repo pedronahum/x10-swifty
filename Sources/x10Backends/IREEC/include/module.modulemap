@@ -1,0 +1,4 @@
+module X10IREEC {
+  header "x10_iree_shim.h"
+  export *
+}

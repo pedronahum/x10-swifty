@@ -1,0 +1,4 @@
+module X10DLPACKC {
+  header "x10_dlpack_shim.h"
+  export *
+}
