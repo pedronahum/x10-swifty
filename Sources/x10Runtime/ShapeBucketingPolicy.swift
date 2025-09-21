@@ -1,6 +1,6 @@
 import x10Core
 
-public struct ShapeBucketingPolicy: Sendable {
+public struct ShapeBucketingPolicy: Sendable, Hashable {
   public var dims: [DimSpec]
 
   public init(dims: [DimSpec]) {

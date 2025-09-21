@@ -138,6 +138,8 @@ Tests/                    # swift-testing suites for core/runtime/backends/inter
 - `X10_IREE_RUNTIME=1` — prefer the in-process runtime shim (falls back to CLI if unavailable).
 - `X10_CACHE_MAX_ENTRIES=N` — cap the executable cache by entry count (default 256).
 - `X10_CACHE_MAX_BYTES=N` — cap the executable cache by total VMFB bytes (default 64 MiB).
+- `X10_CACHE_WARMING=1` — enable cache warming using the recorded top shapes.
+- `X10_CACHE_WARMING_TOPK=N` — number of shapes to precompile when warming (default 3).
 - `X10_IREE_TARGET=llvm-cpu|metal|vulkan-spirv` — target backend passed to `iree-compile`.
 - `X10_IREE_VERBOSE=1` — log the MLIR and CLI calls during tests/examples.
 - `withStrictBarriers { ... }` — helper to fail fast on accidental synchronous `materialize()` calls during async flows.

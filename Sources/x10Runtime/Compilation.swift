@@ -74,15 +74,23 @@ public enum JIT {
       .map { "\($0.key)=\($0.value)" }
       .joined(separator: ";")
 
-    let concreteShape = canonicalConcreteShape(from: stablehlo)
-    let key = makeCacheKey(
+    let extraComponents = ["precision=\(precisionSignature)", "flags=\(flagStr)"]
+    let concreteShape = opts.shapeHint ?? canonicalConcreteShape(from: stablehlo)
+
+    let (key, irHash) = makeCacheKey(
       module: stablehlo,
       backendKey: backendKey,
       deviceKey: deviceKey,
       versionSalt: versionSalt,
       concreteShape: concreteShape,
       bucketing: opts.shapeBucketing,
-      extraComponents: ["precision=\(precisionSignature)", "flags=\(flagStr)"]
+      extraComponents: extraComponents
+    )
+
+    await ShapeProfiler.shared.note(
+      irHash: irHash,
+      policy: opts.shapeBucketing,
+      concreteShape: concreteShape
     )
 
     if let hit = await ExecutableCache.shared.get(key) {
@@ -92,6 +100,24 @@ public enum JIT {
     Diagnostics.uncachedCompiles.inc()
     let exec = try backend.compile(stablehlo: stablehlo, options: opts)
     await ExecutableCache.shared.put(exec, for: key)
+
+    if !opts.isWarmup && cacheWarmingEnabled() {
+      let device = opts.device ?? Device.default
+      let shapes = await ShapeProfiler.shared.topK(
+        irHash: irHash,
+        policy: opts.shapeBucketing,
+        k: cacheWarmingTopK()
+      )
+      if !shapes.isEmpty {
+        await CacheWarmer.shared.warm(
+          module: stablehlo,
+          backend: backend,
+          device: device,
+          policy: opts.shapeBucketing,
+          shapes: shapes
+        )
+      }
+    }
     return exec
   }
 
@@ -141,27 +167,32 @@ public func makeCacheKey(
   concreteShape: [Int],
   bucketing: ShapeBucketingPolicy,
   extraComponents: [String] = []
-) -> ShapeKey {
+) -> (ShapeKey, String) {
   let dimSpecs = resolveDimSpecs(for: concreteShape, using: bucketing)
   let dimSummary = dimSpecs.map(describeDimSpec).joined(separator: ",")
 
-  var components: [String] = [
+  var baseComponents: [String] = [
     "backend=\(backendKey)",
     "device=\(deviceKey)",
     "salt=\(versionSalt)",
-    "dims=\(dimSummary)",
     "ir={\(module.textual())}"
   ]
-  components.append(contentsOf: extraComponents)
+  baseComponents.append(contentsOf: extraComponents)
+  let irHash = fnv1a64(baseComponents.joined(separator: "|"))
 
-  let fingerprint = fnv1a64(components.joined(separator: "|"))
-  return ShapeKey(
+  var fingerprintComponents = baseComponents
+  fingerprintComponents.append("dims=\(dimSummary)")
+  let fingerprint = fnv1a64(fingerprintComponents.joined(separator: "|"))
+
+  let key = ShapeKey(
     fingerprint: fingerprint,
     versionSalt: versionSalt,
     dimSpecs: dimSpecs,
     deviceKey: deviceKey,
     backendKey: backendKey
   )
+
+  return (key, irHash)
 }
 
 private func resolveDimSpecs(for shape: [Int], using policy: ShapeBucketingPolicy) -> [DimSpec] {
@@ -203,4 +234,14 @@ private func describeDimSpec(_ spec: DimSpec) -> String {
   case .bucket(let lo, let hi):
     return "bucket:[\(lo),\(hi)]"
   }
+}
+
+private func cacheWarmingEnabled() -> Bool {
+  ProcessInfo.processInfo.environment["X10_CACHE_WARMING"] == "1"
+}
+
+private func cacheWarmingTopK() -> Int {
+  let env = ProcessInfo.processInfo.environment
+  let raw = env["X10_CACHE_WARMING_TOPK"].flatMap(Int.init) ?? 3
+  return max(1, raw)
 }

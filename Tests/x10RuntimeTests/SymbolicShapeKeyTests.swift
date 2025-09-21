@@ -8,7 +8,7 @@ func bucketedShapesProduceSameKey() {
   let policy = ShapeBucketingPolicy(dims: [.bucket(lo: 192, hi: 256), .bucket(lo: 192, hi: 256), .exact(3)])
   let salt = "iree:1.0:dev"
 
-  let keyA = makeCacheKey(
+  let (keyA, _) = makeCacheKey(
     module: module,
     backendKey: "iree",
     deviceKey: "cpu:0",
@@ -17,7 +17,7 @@ func bucketedShapesProduceSameKey() {
     bucketing: policy
   )
 
-  let keyB = makeCacheKey(
+  let (keyB, _) = makeCacheKey(
     module: module,
     backendKey: "iree",
     deviceKey: "cpu:0",
@@ -34,7 +34,7 @@ func outOfBucketShapesProduceDifferentKey() {
   let module = StableHLOModule()
   let salt = "iree:1.0:dev"
 
-  let keyA = makeCacheKey(
+  let (keyA, _) = makeCacheKey(
     module: module,
     backendKey: "iree",
     deviceKey: "cpu:0",
@@ -43,7 +43,7 @@ func outOfBucketShapesProduceDifferentKey() {
     bucketing: .default
   )
 
-  let keyB = makeCacheKey(
+  let (keyB, _) = makeCacheKey(
     module: module,
     backendKey: "iree",
     deviceKey: "cpu:0",
@@ -61,7 +61,7 @@ func mixedExactAndBucketDimsBehave() {
   let policy = ShapeBucketingPolicy(dims: [.exact(32), .bucket(lo: 128, hi: 256), .any])
   let salt = "pjrt:dev:dev"
 
-  let keyA = makeCacheKey(
+  let (keyA, _) = makeCacheKey(
     module: module,
     backendKey: "pjrt",
     deviceKey: "gpu:0",
@@ -70,7 +70,7 @@ func mixedExactAndBucketDimsBehave() {
     bucketing: policy
   )
 
-  let keyB = makeCacheKey(
+  let (keyB, _) = makeCacheKey(
     module: module,
     backendKey: "pjrt",
     deviceKey: "gpu:0",
@@ -79,7 +79,7 @@ func mixedExactAndBucketDimsBehave() {
     bucketing: policy
   )
 
-  let keyC = makeCacheKey(
+  let (keyC, _) = makeCacheKey(
     module: module,
     backendKey: "pjrt",
     deviceKey: "gpu:0",

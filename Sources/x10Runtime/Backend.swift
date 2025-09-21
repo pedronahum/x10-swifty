@@ -28,6 +28,12 @@ public struct CompileOptions: Sendable {
   /// Shape bucketing behavior used when deriving cache keys.
   public var shapeBucketing: ShapeBucketingPolicy
 
+  /// Optional concrete shape hint (for cache warmers or profilers).
+  public var shapeHint: [Int]?
+
+  /// Internal knob to prevent recursive cache warming.
+  public var isWarmup: Bool
+
   /// Emit IR/text dumps useful for debugging.
   public var debugIR: Bool
 
@@ -41,13 +47,17 @@ public struct CompileOptions: Sendable {
     device: Device? = nil,
     precision: PrecisionPolicy = .init(),
     shapeBucketing: ShapeBucketingPolicy = .default,
+    shapeHint: [Int]? = nil,
     debugIR: Bool = false,
     enableProfiling: Bool = false,
-    flags: [String: String] = [:]
+    flags: [String: String] = [:],
+    isWarmup: Bool = false
   ) {
     self.device = device
     self.precision = precision
     self.shapeBucketing = shapeBucketing
+    self.shapeHint = shapeHint
+    self.isWarmup = isWarmup
     self.debugIR = debugIR
     self.enableProfiling = enableProfiling
     self.flags = flags
