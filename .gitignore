@@ -3,5 +3,7 @@
 .DS_Store
 DerivedData/
 .xcworkspace/
+.clj-kondo/
+.lsp/
 # SwiftPM resolution files
 Package.resolved
