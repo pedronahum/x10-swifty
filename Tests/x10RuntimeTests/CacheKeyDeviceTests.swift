@@ -59,9 +59,17 @@ func cacheIsPerDeviceByExecutableIdentity() async throws {
   let eCPU2 = try await JIT.compileCached(module, with: be, options: cpuOptions)
   #expect(eCPU1 == eCPU2)
 
+  await ExecutableCache.shared.clear()
+  Diagnostics.resetAll()
+
   let eGPU1 = try await JIT.compileCached(module, with: be, options: gpuOptions)
   let eGPU2 = try await JIT.compileCached(module, with: be, options: gpuOptions)
   #expect(eGPU1 == eGPU2)
 
+  await ExecutableCache.shared.clear()
+  Diagnostics.resetAll()
+
+  let eCPU1Again = try await JIT.compileCached(module, with: be, options: cpuOptions)
   #expect(eCPU1 != eGPU1)
+  #expect(eCPU1Again != eGPU1)
 }

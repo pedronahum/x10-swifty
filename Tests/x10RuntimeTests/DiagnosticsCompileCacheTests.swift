@@ -28,6 +28,19 @@ func cacheMissThenHit() async throws {
   CountingBackend.compileCount = 0
   await ExecutableCache.shared.clear()
 
+  let prevWarm = ProcessInfo.processInfo.environment["X10_CACHE_WARMING"]
+  if prevWarm == nil {
+    unsetenv("X10_CACHE_WARMING")
+  }
+  setenv("X10_CACHE_WARMING", "0", 1)
+  defer {
+    if let prevWarm {
+      setenv("X10_CACHE_WARMING", prevWarm, 1)
+    } else {
+      unsetenv("X10_CACHE_WARMING")
+    }
+  }
+
   // Build tiny IR
   let b = IRBuilder()
   let fn = b.function(
