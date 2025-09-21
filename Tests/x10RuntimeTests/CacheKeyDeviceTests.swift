@@ -51,10 +51,10 @@ func cacheIsPerDeviceByExecutableIdentity() async throws {
       Self.compileCount += 1
       return Executable()
     }
-    func execute(_ exec: Executable, inputs: [Buffer], stream: Stream?) async throws -> [Buffer] { inputs }
+    func execute(_ exec: Executable, inputs: [Buffer], stream: x10Runtime.Stream?) async throws -> [Buffer] { inputs }
     func allReduce(_ b: Buffer, op: ReduceOp, group: CollectiveGroup) async throws -> Buffer { b }
-    func stream(device: Dev) throws -> Stream { Stream() }
-    func event(device: Dev) throws -> Event { Event() }
+    func stream(device: Dev) throws -> x10Runtime.Stream { x10Runtime.Stream() }
+    func event(device: Dev) throws -> x10Runtime.Event { x10Runtime.Event() }
   }
   let be = DummyBackend()
   DummyBackend.compileCount = 0
