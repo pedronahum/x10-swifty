@@ -8,6 +8,7 @@ func strictBarriersThrowAndCount() async throws {
   Diagnostics.resetAll()
   do {
     try await withStrictBarriers {
+      #expect(BarrierPolicyScope.BarrierPolicyCurrent.strict)
       let t = Tensor<Float>.ones(shape: [2, 2])
       _ = try await t.materialize()
     }

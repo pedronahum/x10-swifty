@@ -1,4 +1,5 @@
 import Foundation
+import x10Diagnostics
 
 public struct BarrierPolicy: Sendable {
   public var strict: Bool
@@ -40,7 +41,15 @@ public enum BarrierPolicyScope {
 @inlinable
 public func withStrictBarriers<T>(_ body: () async throws -> T) async rethrows -> T {
   let policy = BarrierPolicy(strict: true, captureBacktrace: BarrierPolicy.default.captureBacktrace)
+  let baseline = Diagnostics.strictBarrierViolations.value
   return try await BarrierPolicyScope.$BarrierPolicyCurrent.withValue(policy) {
-    try await body()
+    do {
+      return try await body()
+    } catch let error as BarrierViolationError {
+      if Diagnostics.strictBarrierViolations.value == baseline {
+        Diagnostics.strictBarrierViolations.inc()
+      }
+      throw error
+    }
   }
 }
