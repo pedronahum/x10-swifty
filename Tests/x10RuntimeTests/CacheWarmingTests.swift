@@ -2,14 +2,11 @@ import Testing
 import Dispatch
 @testable import x10Core
 @testable import x10Runtime
+import x10Diagnostics
 
-final class CountingBackend: Backend {
+private struct WarmCountingBackend: Backend {
   struct Dev: Hashable, Sendable { let ordinal: Int }
-
-  private let queue = DispatchQueue(label: "counting-backend")
-  private var _compileCount: Int = 0
-
-  var compileCount: Int { queue.sync { _compileCount } }
+  static var compileCount: Int = 0
 
   func devices() throws -> [Dev] { [Dev(ordinal: 0)] }
   func allocate(shape: [Int], dtype: DType, on: Dev) throws -> Buffer { StubBuffer() }
@@ -17,7 +14,7 @@ final class CountingBackend: Backend {
   func fromDevice(_ buffer: Buffer) throws -> [UInt8] { [] }
 
   func compile(stablehlo: StableHLOModule, options: CompileOptions) throws -> Executable {
-    queue.sync { _compileCount += 1 }
+    Self.compileCount += 1
     return Executable()
   }
 
@@ -27,6 +24,10 @@ final class CountingBackend: Backend {
   func event(device: Dev) throws -> Event { Event() }
 
   private struct StubBuffer: Buffer {}
+
+  static func reset() {
+    Self.compileCount = 0
+  }
 }
 
 @Test
@@ -36,11 +37,12 @@ func cacheWarmingPrimesTopShapes() async throws {
   await ShapeProfiler.shared.reset()
 
   BackendVersioning.register { backend in
-    if backend is CountingBackend { return BackendVersionInfo(kind: "counting", version: "dev") }
+    if backend is WarmCountingBackend { return BackendVersionInfo(kind: "warm", version: "dev") }
     return nil
   }
 
-  let backend = CountingBackend()
+  WarmCountingBackend.reset()
+  let backend = WarmCountingBackend()
   let builder = IRBuilder()
   let fn = builder.function(
     name: "main",
@@ -89,7 +91,7 @@ func cacheWarmingPrimesTopShapes() async throws {
 
   await ExecutableCache.shared.clear()
 
-  let preWarm = backend.compileCount
+  let preWarm = WarmCountingBackend.compileCount
   await CacheWarmer.shared.warm(
     module: module,
     backend: backend,
@@ -97,17 +99,17 @@ func cacheWarmingPrimesTopShapes() async throws {
     policy: policy,
     shapes: top
   )
-  let postWarm = backend.compileCount
+  let postWarm = WarmCountingBackend.compileCount
   #expect(postWarm == preWarm + top.count)
 
   for shape in top {
-    let before = backend.compileCount
+    let before = WarmCountingBackend.compileCount
     var options = CompileOptions(
       device: device,
       shapeBucketing: policy,
       shapeHint: shape
     )
     _ = try await JIT.compileCached(module, with: backend, options: options)
-    #expect(backend.compileCount == before)
+    #expect(WarmCountingBackend.compileCount == before)
   }
 }
