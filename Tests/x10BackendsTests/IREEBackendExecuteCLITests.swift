@@ -3,6 +3,7 @@ import Foundation
 import x10Core
 import x10Runtime
 import x10BackendsIREE
+import x10Diagnostics
 
 @Test
 func ireeBackendExecuteAddIfCLIAvailable() async throws {
@@ -27,6 +28,9 @@ func ireeBackendExecuteAddIfCLIAvailable() async throws {
   let be = IREEBackend()
   let exec = try be.compile(stablehlo: m, options: .init(device: .cpu(0)))
 
+  let runtimeBefore = Diagnostics.executeCallsIreeRuntime.value
+  let cliBefore = Diagnostics.executeCallsIreeCLI.value
+
   // Prepare inputs
   let a: [Float] = [1, 2, 3, 4, 5, 6]
   let b2: [Float] = [4, 5, 6, 4, 5, 6]
@@ -44,4 +48,7 @@ func ireeBackendExecuteAddIfCLIAvailable() async throws {
   let raw = try be.fromDevice(outs[0])
   let out: [Float] = raw.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
   #expect(out == [5, 7, 9, 8, 10, 12])
+
+  #expect(Diagnostics.executeCallsIreeCLI.value == cliBefore + 1)
+  #expect(Diagnostics.executeCallsIreeRuntime.value == runtimeBefore)
 }

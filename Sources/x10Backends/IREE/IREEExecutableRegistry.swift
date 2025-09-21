@@ -8,11 +8,13 @@ public final class IREEExecutableRegistry {
   private let lock = NSLock()
   private var blobs: [UUID: Data] = [:]
   private var device: [UUID: Int] = [:]
+  private var prefersRuntime: [UUID: Bool] = [:]
 
-  public func put(id: UUID, vmfb: Data, defaultDeviceOrdinal: Int) {
+  public func put(id: UUID, vmfb: Data, defaultDeviceOrdinal: Int, preferRuntime: Bool = false) {
     lock.lock(); defer { lock.unlock() }
     blobs[id] = vmfb
     device[id] = defaultDeviceOrdinal
+    prefersRuntime[id] = preferRuntime
   }
 
   public func getVMFB(id: UUID) -> Data? {
@@ -25,8 +27,13 @@ public final class IREEExecutableRegistry {
     return device[id]
   }
 
+  public func shouldPreferRuntime(id: UUID) -> Bool {
+    lock.lock(); defer { lock.unlock() }
+    return prefersRuntime[id] ?? false
+  }
+
   public func clear() {
     lock.lock(); defer { lock.unlock() }
-    blobs.removeAll(); device.removeAll()
+    blobs.removeAll(); device.removeAll(); prefersRuntime.removeAll()
   }
 }

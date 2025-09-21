@@ -18,10 +18,13 @@ public enum BackendPicker {
     let raw = kindOverride?.lowercased()
       ?? env["X10_BACKEND"]?.lowercased()
 
+    let runtimeRequested = isTruthy(env["X10_IREE_RUNTIME"]) && IREEBackend.isReal
+
     switch raw {
     case "iree": return .iree
     case "pjrt": return .pjrt
     case .none:
+      if runtimeRequested { return .iree }
       // Heuristic default: prefer IREE when available (for edge/AOT), else PJRT.
       return IREEBackend.isAvailable ? .iree : .pjrt
     default:
@@ -34,6 +37,14 @@ public enum BackendPicker {
     switch kind ?? choose() {
     case .iree: return .iree(IREEBackend())
     case .pjrt: return .pjrt(PJRTBackend())
+    }
+  }
+
+  private static func isTruthy(_ value: String?) -> Bool {
+    guard let value = value else { return false }
+    switch value.lowercased() {
+    case "1", "true", "yes", "y", "on": return true
+    default: return false
     }
   }
 }

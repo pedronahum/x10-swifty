@@ -90,6 +90,21 @@ result[0]: hal.buffer_view
 
 > You can override the IREE target backend with `X10_IREE_TARGET` (defaults to `llvm-cpu`).
 
+#### Runtime vs CLI
+
+The backend can execute entirely in-process via the IREE runtime shim. Enable it with:
+
+```bash
+X10_IREE_RUNTIME=1 swift run …
+```
+
+and/or pass `CompileOptions(flags: ["iree_runtime": "true"])` when compiling.
+If the runtime shim fails to load, the backend gracefully falls back to the CLI runner.
+Set `X10_IREE_DISABLE=1` to force the CLI path even when the runtime is present.
+
+Diagnostics expose which path was used: `Diagnostics.executeCallsIreeRuntime` and
+`Diagnostics.executeCallsIreeCLI` count each execution.
+
 ---
 
 ## Project layout
@@ -120,6 +135,7 @@ Tests/                    # swift-testing suites for core/runtime/backends/inter
 - `X10_DEFAULT_DEVICE="cpu:0"|"gpu:0"` — default device for `DeviceScope` when caller does not set one.
 - `X10_PJRT_STUB_DEVICE_COUNT=N` — number of stub “gpu” devices the PJRT shim should expose.
 - `X10_IREE_PREFIX`, `X10_IREE_BIN`, `X10_IREE_RUN_BIN` — IREE locations for the CLI path.
+- `X10_IREE_RUNTIME=1` — prefer the in-process runtime shim (falls back to CLI if unavailable).
 - `X10_IREE_TARGET=llvm-cpu|metal|vulkan-spirv` — target backend passed to `iree-compile`.
 - `X10_IREE_VERBOSE=1` — log the MLIR and CLI calls during tests/examples.
 
@@ -224,3 +240,77 @@ let bytes = try DLPack.toHostBytes(cap)
 ---
 
 **Have fun!** This is a learning/testing ground to make X10 concepts feel truly *Swifty* and pragmatic for modern ML/edge scenarios.
+
+
+
+## Top priority
+
+### P0 scope (what to do next, in small PR‑sized chunks)
+
+#### P0.1 — Minimal IREE runtime shim (CPU first)
+
+Add a guarded C target x10InteropIREEC that dynamically loads the IREE runtime library and wraps just what we need:
+
+load a VMFB from bytes → runtime module handle
+
+create a runtime instance + device (driver local-task for CPU)
+
+create a context
+
+prepare inputs/outputs (tensor→iree_hal_buffer_view)
+
+invoke entry by name
+
+read back outputs into host memory
+
+Expose a tiny Swift wrapper IREEVM that mirrors those calls safely.
+
+Acceptance: new test IREEBackendRuntimeExecuteTests (guarded by X10_IREE_RUNTIME=1) runs the add example end‑to‑end without spawning a process; all existing tests remain green.
+
+#### P0.2 — Switch IREEBackend.execute to runtime (with CLI fallback)
+
+In IREEBackend.execute, if X10_IREE_RUNTIME=1 (or CompileOptions.flags["iree_runtime"]=true):
+
+Fetch VMFB bytes from IREEExecutableRegistry.
+
+Load the module via the runtime wrapper.
+
+Marshal inputs from Buffer → iree_hal_buffer_view (copy for CPU now).
+
+Invoke, extract outputs, return Buffers (host‑backed for now).
+
+Otherwise, keep the current CLI path. It’s great for debugging and for developers without the runtime libs installed.
+
+Acceptance: runtime and CLI paths produce identical results for the add example (compare bytes).
+
+#### P0.3 — Backend selection polish + diagnostics
+
+Teach BackendPicker to prefer the runtime path if available: X10_BACKEND=iree + X10_IREE_RUNTIME=1.
+
+Add Diagnostics.executeCalls{.ireeRuntime,.ireeCLI} counters so we can see what’s being exercised.
+
+Update README with a short “runtime vs CLI” section and env toggles.
+
+Acceptance: counters visible in tests; docs updated.
+
+## P1 immediately after
+
+LRU cache + version salt
+Cap entries by count/bytes; add a salt (e.g., backend type + toolchain string) to invalidate stale execs automatically.
+
+Symbolic shapes / bucketing (pragmatic first cut)
+Let ShapeKey encode “known/dynamic” dims (Int?) and bucket ranges (e.g., 224–256) for common workloads. Emit deterministic fingerprints from IR + bucketing metadata.
+
+Strict barrier mode
+Keep materialize() async; add strict mode (env or option) that throws with a source‑mapped note when we sync in hot paths. Increment Diagnostics.forcedEvaluations.
+
+## P2: edge & ergonomics
+
+IREE Metal/Vulkan targets + AOT packaging:
+Allow X10_IREE_TARGET=metal|vulkan-spirv; add a tiny tool to embed vmfb in app bundles (resources or Swift literals).
+
+DLPack device capsules:
+Once the runtime is in, add device‑side DLPack export/import for zero‑copy graphs between backends.
+
+Swifty @jit macro (MVP):
+Start with a macro that captures a Swift closure and emits the small StableHLO textual skeleton we already support, with shape annotations. Build out from there.

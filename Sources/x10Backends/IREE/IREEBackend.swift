@@ -1,6 +1,7 @@
 import Foundation
 import x10Core
 import x10Runtime
+import x10Diagnostics
 import x10InteropDLPack   // for DLPack copy-out in fromDevice
 
 /// IREE backend (CLI-backed).
@@ -111,7 +112,8 @@ public struct IREEBackend: Backend {
 
     // Cache artifact for the executable
     let exec = Executable()
-    IREEExecutableRegistry.shared.put(id: exec.id, vmfb: vmfb, defaultDeviceOrdinal: 0)
+    let preferRuntime = Self.runtimeFlagEnabled(options.flags["iree_runtime"])
+    IREEExecutableRegistry.shared.put(id: exec.id, vmfb: vmfb, defaultDeviceOrdinal: 0, preferRuntime: preferRuntime)
     return exec
   }
 
@@ -128,13 +130,36 @@ public struct IREEBackend: Backend {
                     userInfo: [NSLocalizedDescriptionKey:
                       "VMFB not found for exec \(exec.id). Did you call compile()?"])
     }
+
+    let env = ProcessInfo.processInfo.environment
+    if env["X10_IREE_DISABLE"] == "1" {
+      return try cliExecute(vmfb: vmfb, inputs: inputs)
+    }
+
+    let runtimeRequested = Self.runtimeFlagEnabled(env["X10_IREE_RUNTIME"]) ||
+      IREEExecutableRegistry.shared.shouldPreferRuntime(id: exec.id)
+
+    if runtimeRequested {
+      do {
+        return try runtimeExecute(vmfb: vmfb, entry: "main", inputs: inputs)
+      } catch let error as NSError where error.domain == "IREE" && error.code == 7110 {
+        if env["X10_IREE_VERBOSE"] == "1" {
+          let message = "[IREE] runtime unavailable (\(error.localizedDescription)); falling back to CLI\n"
+          FileHandle.standardError.write(Data(message.utf8))
+        }
+      }
+    }
+
+    return try cliExecute(vmfb: vmfb, inputs: inputs)
+  }
+
+  private func cliExecute(vmfb: Data, inputs: [Buffer]) throws -> [Buffer] {
     // Ensure runner exists
     guard IREEExecuteCLI.find() != nil else {
       throw NSError(domain: "IREE", code: 7102,
                     userInfo: [NSLocalizedDescriptionKey:
                       "iree-run-module not available (set X10_IREE_PREFIX / X10_IREE_RUN_BIN)"])
     }
-
     // Convert inputs to CLI text: one --input=... flag per tensor.
     let cliInputs: [String] = try inputs.map { anyBuf in
       if let ib = anyBuf as? IREEDeviceBuffer, let scalars = ib.asScalarStringsForCLI() {
@@ -204,10 +229,53 @@ public struct IREEBackend: Backend {
     }
 
     let outBuf = IREEDeviceBuffer(shape: res.shape, dtype: outDType, host: outData)
+    Diagnostics.executeCallsIreeCLI.inc()
     return [outBuf]
   }
 
   public func allReduce(_ b: Buffer, op: ReduceOp, group: CollectiveGroup) async throws -> Buffer { b }
   public func stream(device: Dev) throws -> x10Runtime.Stream { x10Runtime.Stream() }  // fully-qualified
   public func event(device: Dev) throws -> x10Runtime.Event { x10Runtime.Event() }     // fully-qualified
+}
+
+private extension IREEBackend {
+  static func runtimeFlagEnabled(_ value: String?) -> Bool {
+    guard let value = value else { return false }
+    switch value.lowercased() {
+    case "1", "true", "yes", "y", "on": return true
+    default: return false
+    }
+  }
+
+  func runtimeExecute(vmfb: Data, entry: String, inputs: [Buffer]) throws -> [Buffer] {
+    guard IREEVM.isRuntimeReady() else {
+      throw NSError(domain: "IREE", code: 7110,
+                    userInfo: [NSLocalizedDescriptionKey:
+                      "IREE runtime shim not available (set X10_IREE_RUNTIME_LIB)"])
+    }
+
+    let vm = try IREEVM(vmfb: vmfb)
+    let prepared = try inputs.map { try runtimeInput(from: $0) }
+    let outputs = try vm.invoke(entry: entry, inputs: prepared)
+    Diagnostics.executeCallsIreeRuntime.inc()
+    return outputs.map { IREEDeviceBuffer(shape: $0.shape, dtype: $0.dtype, host: $0.data) }
+  }
+
+  func runtimeInput(from buffer: Buffer) throws -> IREEVM.TensorInput {
+    guard let ib = buffer as? IREEDeviceBuffer else {
+      throw NSError(domain: "IREE", code: 7111,
+                    userInfo: [NSLocalizedDescriptionKey: "Expected IREEDeviceBuffer input"])
+    }
+
+    let data: Data
+    switch ib.storage {
+    case .host(let hostData):
+      data = hostData
+    case .dlcap:
+      let raw = try fromDevice(buffer)
+      data = Data(raw)
+    }
+
+    return IREEVM.TensorInput(shape: ib.shape, dtype: ib.dtype, data: data)
+  }
 }

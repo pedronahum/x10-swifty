@@ -12,22 +12,16 @@ public extension IREEBackend {
   /// We’ll wire this up when we add the runtime shim; for now it’s `false`.
   /// If you later define `X10_IREE_HAVE_HEADERS` in SwiftPM settings, this will flip to `true`.
   static var isReal: Bool {
-    #if X10_IREE_HAVE_HEADERS
-      return true
-    #else
-      return false
-    #endif
+    if ProcessInfo.processInfo.environment["X10_IREE_DISABLE"] == "1" { return false }
+    return IREEVM.isRuntimeReady()
   }
 
   /// Human‑readable probe summary (handy in logs/tests).
   static var availabilityDetail: String {
     let haveCompile = IREECompileCLI.find() != nil
     let haveRun     = IREEExecuteCLI.find() != nil
-    #if X10_IREE_HAVE_HEADERS
-      let haveRuntime = true
-    #else
-      let haveRuntime = false
-    #endif
+    let _ = ProcessInfo.processInfo.environment["X10_IREE_RUNTIME"] == "1"
+    let haveRuntime = IREEVM.isRuntimeReady()
     let disabled    = ProcessInfo.processInfo.environment["X10_IREE_DISABLE"] == "1"
     return "compileCLI=\(haveCompile) runCLI=\(haveRun) runtime=\(haveRuntime) disabled=\(disabled)"
   }

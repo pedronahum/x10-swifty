@@ -82,10 +82,30 @@ let package = Package(
         .headerSearchPath("include/third_party/iree")
       ]
     ),
+    .target(
+      name: "x10InteropIREEC",
+      path: "Sources/x10InteropIREEC",
+      sources: ["x10_iree_runtime_shim.c"],
+      publicHeadersPath: "include",
+      cSettings: [
+        .define("X10_IREE_HAVE_HEADERS"),
+        .headerSearchPath("../x10Backends/IREEC/include/third_party/iree"),
+        .headerSearchPath("../x10Backends/IREEC/include/third_party/iree/runtime/src")
+      ],
+      linkerSettings: [
+        .linkedLibrary("dl", .when(platforms: [.linux]))
+      ]
+    ),
       // Swift wrapper
     .target(
       name: "x10BackendsIREE",
-      dependencies: ["x10Core", "x10Runtime", "X10IREEC", "x10InteropDLPackC"],
+      dependencies: [
+        "x10Core",
+        "x10Runtime",
+        "X10IREEC",
+        "x10InteropDLPackC",
+        "x10InteropIREEC"
+      ],
       path: "Sources/x10Backends/IREE"),
 
     .target(
