@@ -1,5 +1,6 @@
 import Testing
 import x10Core
+import Darwin
 import x10Runtime
 import x10Diagnostics
 
@@ -8,6 +9,19 @@ func cacheIsPerDeviceByExecutableIdentity() async throws {
   // Ensure a clean slate for this test only.
   Diagnostics.resetAll()
   await ExecutableCache.shared.clear()
+
+  let prevWarm = ProcessInfo.processInfo.environment["X10_CACHE_WARMING"]
+  if prevWarm == nil {
+    unsetenv("X10_CACHE_WARMING")
+  }
+  setenv("X10_CACHE_WARMING", "0", 1)
+  defer {
+    if let prevWarm {
+      setenv("X10_CACHE_WARMING", prevWarm, 1)
+    } else {
+      unsetenv("X10_CACHE_WARMING")
+    }
+  }
 
   // Build a tiny StableHLO: r = a + b  (f32[2,3])
   let b = IRBuilder()
