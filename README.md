@@ -140,6 +140,7 @@ Tests/                    # swift-testing suites for core/runtime/backends/inter
 - `X10_CACHE_MAX_BYTES=N` — cap the executable cache by total VMFB bytes (default 64 MiB).
 - `X10_IREE_TARGET=llvm-cpu|metal|vulkan-spirv` — target backend passed to `iree-compile`.
 - `X10_IREE_VERBOSE=1` — log the MLIR and CLI calls during tests/examples.
+- `withStrictBarriers { ... }` — helper to fail fast on accidental synchronous `materialize()` calls during async flows.
 
 ---
 

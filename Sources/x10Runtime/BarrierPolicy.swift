@@ -1,28 +1,46 @@
 import Foundation
-import x10Core
 
 public struct BarrierPolicy: Sendable {
   public var strict: Bool
-  public init(strict: Bool = false) { self.strict = strict }
+  public var captureBacktrace: Bool
+
+  public init(strict: Bool = false, captureBacktrace: Bool = true) {
+    self.strict = strict
+    self.captureBacktrace = captureBacktrace
+  }
+
+  public static let `default` = BarrierPolicy(strict: false, captureBacktrace: true)
 }
 
-public enum BarrierError: Error, CustomStringConvertible, Sendable {
-  case strictBarrier(file: StaticString, line: UInt, backtrace: [String])
+public struct BarrierViolationError: Error, CustomStringConvertible, Sendable {
+  public let site: (file: StaticString, line: UInt)
+  public let opHint: String
+  public let backtrace: [String]?
+
+  public init(site: (file: StaticString, line: UInt), opHint: String, backtrace: [String]?) {
+    self.site = site
+    self.opHint = opHint
+    self.backtrace = backtrace
+  }
+
   public var description: String {
-    switch self {
-    case .strictBarrier(let file, let line, let bt):
-      return "Strict barrier violation at \(file):\(line)\n" + bt.joined(separator: "\n")
+    var lines: [String] = ["Barrier violation during \(opHint) at \(site.file):\(site.line)"]
+    if let bt = backtrace, !bt.isEmpty {
+      lines.append("Backtrace:")
+      lines.append(contentsOf: bt)
     }
+    return lines.joined(separator: "\n")
   }
 }
 
-public enum BarrierScope {
-  @TaskLocal public static var policy = BarrierPolicy()
+public enum BarrierPolicyScope {
+  @TaskLocal public static var BarrierPolicyCurrent: BarrierPolicy = .default
 }
 
 @inlinable
-public func withStrictBarriers<T>(
-  _ enabled: Bool, _ body: () async throws -> T
-) async rethrows -> T {
-  try await BarrierScope.$policy.withValue(.init(strict: enabled)) { try await body() }
+public func withStrictBarriers<T>(_ body: () async throws -> T) async rethrows -> T {
+  let policy = BarrierPolicy(strict: true, captureBacktrace: BarrierPolicy.default.captureBacktrace)
+  return try await BarrierPolicyScope.$BarrierPolicyCurrent.withValue(policy) {
+    try await body()
+  }
 }

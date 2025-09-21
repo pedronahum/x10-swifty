@@ -15,6 +15,7 @@ public enum Diagnostics {
   public static var uncachedCompiles = Counter("uncached_compiles")
   public static var executeCallsIreeRuntime = Counter("execute_calls_iree_runtime")
   public static var executeCallsIreeCLI = Counter("execute_calls_iree_cli")
+  public static var strictBarrierViolations = Counter("strict_barrier_violations")
 
   @inlinable
   public static func resetAll() {
@@ -22,5 +23,6 @@ public enum Diagnostics {
     uncachedCompiles.reset()
     executeCallsIreeRuntime.reset()
     executeCallsIreeCLI.reset()
+    strictBarrierViolations.reset()
   }
 }

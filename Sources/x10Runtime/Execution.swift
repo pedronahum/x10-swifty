@@ -7,8 +7,11 @@ extension x10Core.Tensor {
   public func materialize(
     file: StaticString = #fileID, line: UInt = #line
   ) async throws -> Self {
-    if BarrierScope.policy.strict {
-      throw BarrierError.strictBarrier(file: file, line: line, backtrace: Thread.callStackSymbols)
+    let policy = BarrierPolicyScope.BarrierPolicyCurrent
+    if policy.strict {
+      Diagnostics.strictBarrierViolations.inc()
+      let bt = policy.captureBacktrace ? Thread.callStackSymbols : nil
+      throw BarrierViolationError(site: (file, line), opHint: "materialize", backtrace: bt)
     }
     Diagnostics.forcedEvaluations.inc()
     return self // stub: real path will await device work
@@ -18,8 +21,11 @@ extension x10Core.Tensor {
   public func materializeHost(
     file: StaticString = #fileID, line: UInt = #line
   ) async throws -> Data {
-    if BarrierScope.policy.strict {
-      throw BarrierError.strictBarrier(file: file, line: line, backtrace: Thread.callStackSymbols)
+    let policy = BarrierPolicyScope.BarrierPolicyCurrent
+    if policy.strict {
+      Diagnostics.strictBarrierViolations.inc()
+      let bt = policy.captureBacktrace ? Thread.callStackSymbols : nil
+      throw BarrierViolationError(site: (file, line), opHint: "materializeHost", backtrace: bt)
     }
     Diagnostics.forcedEvaluations.inc()
     return Data() // stub: wire to backend.fromDevice(_) later
