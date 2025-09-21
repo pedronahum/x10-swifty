@@ -1,5 +1,7 @@
 import Foundation
+import Darwin
 import Testing
+import x10Diagnostics
 @testable import x10Core
 @testable import x10Runtime
 @testable import x10BackendsPJRT
