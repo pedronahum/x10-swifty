@@ -104,7 +104,7 @@ func cacheWarmingPrimesTopShapes() async throws {
 
   for shape in top {
     let before = WarmCountingBackend.compileCount
-    var options = CompileOptions(
+    let options = CompileOptions(
       device: device,
       shapeBucketing: policy,
       shapeHint: shape
