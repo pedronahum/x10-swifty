@@ -136,6 +136,8 @@ Tests/                    # swift-testing suites for core/runtime/backends/inter
 - `X10_PJRT_STUB_DEVICE_COUNT=N` — number of stub “gpu” devices the PJRT shim should expose.
 - `X10_IREE_PREFIX`, `X10_IREE_BIN`, `X10_IREE_RUN_BIN` — IREE locations for the CLI path.
 - `X10_IREE_RUNTIME=1` — prefer the in-process runtime shim (falls back to CLI if unavailable).
+- `X10_CACHE_MAX_ENTRIES=N` — cap the executable cache by entry count (default 256).
+- `X10_CACHE_MAX_BYTES=N` — cap the executable cache by total VMFB bytes (default 64 MiB).
 - `X10_IREE_TARGET=llvm-cpu|metal|vulkan-spirv` — target backend passed to `iree-compile`.
 - `X10_IREE_VERBOSE=1` — log the MLIR and CLI calls during tests/examples.
 

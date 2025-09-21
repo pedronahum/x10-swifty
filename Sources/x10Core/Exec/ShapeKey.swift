@@ -1,8 +1,13 @@
 public struct ShapeKey: Hashable, Sendable {
   public let fingerprint: String
-  public init(fingerprint: String) { self.fingerprint = fingerprint }
+  public let versionSalt: String
 
-  public init(module m: StableHLOModule) {
+  public init(fingerprint: String, versionSalt: String = "") {
+    self.fingerprint = fingerprint
+    self.versionSalt = versionSalt
+  }
+
+  public init(module m: StableHLOModule, versionSalt: String = "") {
     var parts: [String] = []
     for f in m.functions {
       parts.append("fn:\(f.name)")
@@ -10,6 +15,7 @@ public struct ShapeKey: Hashable, Sendable {
       parts.append("rets:\(f.results.map(Self.sig).joined(separator: ";"))")
     }
     self.fingerprint = parts.joined(separator: "|")
+    self.versionSalt = versionSalt
   }
 
   private static func sig(_ v: StableHLOModule.Value) -> String {

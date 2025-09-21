@@ -16,7 +16,7 @@ public struct IREEBackend: Backend {
     public init(ordinal: Int) { self.ordinal = ordinal }
   }
 
-  public init() {}
+  public init() { Self.ensureCacheRegistration() }
 
   public func devices() throws -> [Dev] { [Dev(ordinal: 0)] }
   public func deviceDescription(_ d: Dev) -> String { "cpu:\(d.ordinal) (iree-cli)" }

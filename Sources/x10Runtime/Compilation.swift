@@ -4,6 +4,39 @@ import Foundation
 import x10Core
 import x10Diagnostics
 
+public struct BackendVersionInfo {
+  let kind: String
+  let version: String
+}
+
+public enum BackendVersioning {
+  private static let queue = DispatchQueue(label: "x10.BackendVersioning")
+  private static var resolvers: [(Any) -> BackendVersionInfo?] = []
+
+  public static func register(_ resolver: @escaping (Any) -> BackendVersionInfo?) {
+    queue.sync { resolvers.append(resolver) }
+  }
+
+  static func info(for backend: Any) -> BackendVersionInfo {
+    let handlers = queue.sync { resolvers }
+    for resolver in handlers.reversed() {
+      if let info = resolver(backend) {
+        return info
+      }
+    }
+    let typeName = String(reflecting: type(of: backend)).lowercased()
+    let kind: String
+    if typeName.contains("iree") {
+      kind = "iree"
+    } else if typeName.contains("pjrt") {
+      kind = "pjrt"
+    } else {
+      kind = "unknown"
+    }
+    return BackendVersionInfo(kind: kind, version: "dev")
+  }
+}
+
 /// JIT front-end: compiles StableHLO with a Backend and caches Executables
 /// using a stable key derived from (device, precision, flags, textual IR).
 public enum JIT {
@@ -68,8 +101,12 @@ public enum JIT {
       "ir={\(ir)}"
     ].joined(separator: "|")
 
+    let info = BackendVersioning.info(for: backend)
+    let packageVer = "dev"
+    let versionSalt = "\(info.kind):\(info.version):\(packageVer)"
+
     let fp = fnv1a64(composed)
-    return ShapeKey(fingerprint: fp)
+    return ShapeKey(fingerprint: fp, versionSalt: versionSalt)
   }
 
   /// Maps precision enums to short string codes used in the key.
