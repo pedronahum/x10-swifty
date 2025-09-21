@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import x10Core
 @testable import x10Runtime
@@ -5,10 +6,15 @@ import Testing
 
 @Test
 func compileCachedReturnsSameExecutableForSameShapes() async throws {
+  Diagnostics.resetAll()
+  await ExecutableCache.shared.clear()
+  try setenv("X10_CACHE_WARMING", "0", 1)
+  defer { setenv("X10_CACHE_WARMING", "0", 1) }
+
   let be = PJRTBackend()
 
-  let b = IRBuilder()
-  let fn = b.function(
+  let builder = IRBuilder()
+  let fn = builder.function(
     name: "add",
     args: [("a", [2, 3], .f32), ("b", [2, 3], .f32)],
     results: [("r", [2, 3], .f32)]
@@ -19,9 +25,9 @@ func compileCachedReturnsSameExecutableForSameShapes() async throws {
     f.add(a, b, into: r)
     f.returnValues([r])
   }
-  let m = StableHLOModule(functions: [fn])
+  let module = StableHLOModule(functions: [fn])
 
-  let e1 = try await JIT.compileCached(m, with: be)
-  let e2 = try await JIT.compileCached(m, with: be)
+  let e1 = try await JIT.compileCached(module, with: be)
+  let e2 = try await JIT.compileCached(module, with: be)
   #expect(e1 == e2)
 }
