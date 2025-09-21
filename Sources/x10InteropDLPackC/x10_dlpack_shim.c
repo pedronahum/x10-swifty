@@ -2,236 +2,267 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <dlpack/dlpack.h>
+
+struct x10_dl_capsule
+{
+  DLManagedTensor *mt;
+  int64_t *shape_copy;
+  int64_t *strides_copy;
+  int refcount;
+  int32_t device_type;
+  int32_t device_id;
+};
+
 static const char *g_last_error = "";
 static void set_last_error(const char *msg) { g_last_error = msg ? msg : ""; }
 
+int x10_dlpack_is_available(void) { return 1; }
 const char *x10_dlpack_last_error(void) { return g_last_error; }
 
-int x10_dlpack_is_available(void)
-{
-#if defined(X10_HAVE_DLPACK_HEADERS)
-  return 1;
-#else
-  return 0;
-#endif
-}
+// --- deleters ---
 
-int x10_dlpack_dispose(x10_dl_capsule_t cap)
-{
-#if defined(X10_HAVE_DLPACK_HEADERS)
-  if (!cap)
-    return 1;
-  typedef struct DLManagedTensor DLManagedTensor;
-  extern void x10_dlpack_internal_call_deleter(void *mt);
-  x10_dlpack_internal_call_deleter(cap->_opaque);
-  free(cap);
-  return 1;
-#else
-  (void)cap;
-  return 1;
-#endif
-}
-
-#if defined(X10_HAVE_DLPACK_HEADERS)
-
-// ----------------------- REAL PATH (headers present) -------------------------
-#include <dlpack/dlpack.h>
-
-typedef struct
-{
-  void *data;
-  size_t nbytes;
-  int64_t *shape;
-  int ndim;
-} x10_owned_host_t;
-
-static void x10_host_deleter(DLManagedTensor *self)
+static void x10_dl_deleter_free_data(DLManagedTensor *self)
 {
   if (!self)
     return;
-  x10_owned_host_t *st = (x10_owned_host_t *)self->manager_ctx;
-  if (st)
+  if (self->dl_tensor.data)
+    free(self->dl_tensor.data);
+  // DLManagedTensor freed by capsule dispose
+}
+
+// --- internal helpers ---
+
+static x10_dl_capsule_t x10_alloc_capsule(
+    void *data,
+    const int64_t *shape, int32_t ndim,
+    DLDataType dtype,
+    DLDevice device,
+    DLManagedTensor **out_mt /*optional*/,
+    void (*deleter)(DLManagedTensor *))
+{
+  set_last_error("");
+  if (!data || !shape || ndim <= 0)
   {
-    if (st->data)
-      free(st->data);
-    if (st->shape)
-      free(st->shape);
-    free(st);
+    set_last_error("invalid args");
+    return NULL;
   }
-  free(self);
+
+  x10_dl_capsule_t cap = (x10_dl_capsule_t)calloc(1, sizeof(*cap));
+  if (!cap)
+  {
+    set_last_error("oom");
+    return NULL;
+  }
+
+  cap->mt = (DLManagedTensor *)calloc(1, sizeof(DLManagedTensor));
+  if (!cap->mt)
+  {
+    free(cap);
+    set_last_error("oom");
+    return NULL;
+  }
+
+  cap->shape_copy = (int64_t *)malloc(sizeof(int64_t) * (size_t)ndim);
+  if (!cap->shape_copy)
+  {
+    free(cap->mt);
+    free(cap);
+    set_last_error("oom");
+    return NULL;
+  }
+  memcpy(cap->shape_copy, shape, sizeof(int64_t) * (size_t)ndim);
+
+  cap->strides_copy = NULL; // dense
+  cap->refcount = 1;
+  cap->device_type = (int32_t)device.device_type;
+  cap->device_id = (int32_t)device.device_id;
+
+  DLTensor *t = &cap->mt->dl_tensor;
+  t->data = data;
+  t->device = device;
+  t->ndim = ndim;
+  t->dtype = dtype;
+  t->shape = cap->shape_copy;
+  t->strides = NULL;
+  t->byte_offset = 0;
+
+  cap->mt->manager_ctx = NULL;
+  cap->mt->deleter = deleter;
+
+  if (out_mt)
+    *out_mt = cap->mt;
+  return cap;
 }
 
-static size_t x10_elem_size(int32_t bits, int32_t lanes)
-{
-  if (lanes <= 0)
-    return 0;
-  if (bits % 8 != 0)
-    return 0;
-  return (size_t)(bits / 8) * (size_t)lanes;
-}
+// --- API impl ---
 
-static size_t x10_total_nbytes(const DLTensor *t)
+x10_dl_capsule_t x10_dlpack_wrap_host_buffer_free(
+    void *data,
+    const int64_t *shape, int32_t ndim,
+    int32_t dtype_code, int32_t dtype_bits, int32_t dtype_lanes)
 {
-  size_t el = x10_elem_size(t->dtype.bits, t->dtype.lanes);
-  if (el == 0)
-    return 0;
-  size_t elems = 1;
-  for (int i = 0; i < t->ndim; ++i)
-    elems *= (size_t)t->shape[i];
-  return el * elems;
+  DLDevice dev = {.device_type = kDLCPU, .device_id = 0};
+  DLDataType dt = {.code = (uint8_t)dtype_code, .bits = (uint8_t)dtype_bits, .lanes = (uint16_t)dtype_lanes};
+  return x10_alloc_capsule(data, shape, ndim, dt, dev, NULL, x10_dl_deleter_free_data);
 }
 
 int x10_dlpack_wrap_host_copy(
-    const void *data, size_t nbytes,
-    const int64_t *shape, int ndim,
-    int32_t code, int32_t bits, int32_t lanes,
+    const void *bytes, size_t nbytes,
+    const int64_t *shape, int32_t ndim,
+    int32_t dtype_code, int32_t dtype_bits, int32_t dtype_lanes,
     int32_t device_type, int32_t device_id,
     x10_dl_capsule_t *out_cap)
 {
-  if (!data || !shape || ndim <= 0 || !out_cap)
+  set_last_error("");
+  if (!bytes || !shape || ndim <= 0 || !out_cap)
   {
-    set_last_error("bad args");
+    set_last_error("invalid args");
     return 0;
   }
-  size_t el = x10_elem_size(bits, lanes);
-  if (el == 0)
+  void *data = malloc(nbytes);
+  if (!data)
   {
-    set_last_error("unsupported dtype");
+    set_last_error("oom");
     return 0;
   }
+  memcpy(data, bytes, nbytes);
 
-  // Allocate owned copies
-  void *buf = malloc(nbytes);
-  if (!buf)
-  {
-    set_last_error("malloc data failed");
-    return 0;
-  }
-  memcpy(buf, data, nbytes);
-
-  int64_t *shp = (int64_t *)malloc((size_t)ndim * sizeof(int64_t));
-  if (!shp)
-  {
-    free(buf);
-    set_last_error("malloc shape failed");
-    return 0;
-  }
-  memcpy(shp, shape, (size_t)ndim * sizeof(int64_t));
-
-  x10_owned_host_t *st = (x10_owned_host_t *)malloc(sizeof(x10_owned_host_t));
-  if (!st)
-  {
-    free(buf);
-    free(shp);
-    set_last_error("malloc state failed");
-    return 0;
-  }
-  st->data = buf;
-  st->nbytes = nbytes;
-  st->shape = shp;
-  st->ndim = ndim;
-
-  DLManagedTensor *mt = (DLManagedTensor *)malloc(sizeof(DLManagedTensor));
-  if (!mt)
-  {
-    free(buf);
-    free(shp);
-    free(st);
-    set_last_error("malloc mt failed");
-    return 0;
-  }
-  memset(mt, 0, sizeof(*mt));
-
-  mt->dl_tensor.data = buf;
-  mt->dl_tensor.device.device_type = (DLDeviceType)device_type;
-  mt->dl_tensor.device.device_id = device_id;
-  mt->dl_tensor.ndim = ndim;
-  mt->dl_tensor.dtype.code = (uint8_t)code;
-  mt->dl_tensor.dtype.bits = (uint8_t)bits;
-  mt->dl_tensor.dtype.lanes = (uint16_t)lanes;
-  mt->dl_tensor.shape = shp;
-  mt->dl_tensor.strides = NULL;
-  mt->dl_tensor.byte_offset = 0;
-
-  mt->manager_ctx = st;
-  mt->deleter = x10_host_deleter;
-
-  x10_dl_capsule_t cap = (x10_dl_capsule_t)malloc(sizeof(*cap));
+  DLDevice dev = {.device_type = (DLDeviceType)device_type, .device_id = device_id};
+  DLDataType dt = {.code = (uint8_t)dtype_code, .bits = (uint8_t)dtype_bits, .lanes = (uint16_t)dtype_lanes};
+  x10_dl_capsule_t cap = x10_alloc_capsule(data, shape, ndim, dt, dev, NULL, x10_dl_deleter_free_data);
   if (!cap)
   {
-    x10_host_deleter(mt);
-    set_last_error("malloc cap failed");
+    free(data);
     return 0;
   }
-  cap->_opaque = (void *)mt;
   *out_cap = cap;
   return 1;
 }
 
-int x10_dlpack_to_host_copy(
-    x10_dl_capsule_t cap, void *dst, size_t dst_size, size_t *written)
+x10_dl_capsule_t x10_dlpack_retain(x10_dl_capsule_t cap)
 {
-  if (!cap || !cap->_opaque)
+  if (cap)
+    cap->refcount++;
+  return cap;
+}
+
+void x10_dlpack_dispose(x10_dl_capsule_t cap)
+{
+  if (!cap)
+    return;
+  if (--cap->refcount > 0)
+    return;
+  if (cap->mt && cap->mt->deleter)
+  {
+    cap->mt->deleter(cap->mt); // free data if owner
+  }
+  if (cap->shape_copy)
+    free(cap->shape_copy);
+  if (cap->strides_copy)
+    free(cap->strides_copy);
+  if (cap->mt)
+    free(cap->mt);
+  free(cap);
+}
+
+int x10_dlpack_basic_info(
+    x10_dl_capsule_t cap,
+    int32_t *out_device_type, int32_t *out_device_id,
+    int32_t *out_dtype_code, int32_t *out_dtype_bits, int32_t *out_dtype_lanes,
+    int32_t *out_ndim)
+{
+  set_last_error("");
+  if (!cap || !cap->mt)
   {
     set_last_error("null cap");
     return 0;
   }
-  DLManagedTensor *mt = (DLManagedTensor *)cap->_opaque;
-  size_t need = x10_total_nbytes(&mt->dl_tensor);
-  if (written)
-    *written = need;
-  if (!dst)
-    return 1;
-  if (dst_size < need)
-  {
-    set_last_error("dst too small");
-    return 0;
-  }
-  memcpy(dst, mt->dl_tensor.data, need);
+  const DLTensor *t = &cap->mt->dl_tensor;
+  if (out_device_type)
+    *out_device_type = (int32_t)t->device.device_type;
+  if (out_device_id)
+    *out_device_id = (int32_t)t->device.device_id;
+  if (out_dtype_code)
+    *out_dtype_code = (int32_t)t->dtype.code;
+  if (out_dtype_bits)
+    *out_dtype_bits = (int32_t)t->dtype.bits;
+  if (out_dtype_lanes)
+    *out_dtype_lanes = (int32_t)t->dtype.lanes;
+  if (out_ndim)
+    *out_ndim = (int32_t)t->ndim;
   return 1;
 }
 
-// Helper so dispose() can call deleter
-void x10_dlpack_internal_call_deleter(void *mt_raw)
+int x10_dlpack_shape(x10_dl_capsule_t cap, int64_t *out_shape, int32_t capacity)
 {
-  DLManagedTensor *mt = (DLManagedTensor *)mt_raw;
-  if (mt && mt->deleter)
-    mt->deleter(mt);
+  set_last_error("");
+  if (!cap || !cap->mt)
+  {
+    set_last_error("null cap");
+    return -1;
+  }
+  const DLTensor *t = &cap->mt->dl_tensor;
+  if (!out_shape || capacity < (int32_t)t->ndim)
+  {
+    set_last_error("capacity too small");
+    return -1;
+  }
+  for (int i = 0; i < (int)t->ndim; ++i)
+    out_shape[i] = t->shape[i];
+  return (int)t->ndim;
 }
 
-#else // --------------------- STUB PATH (no headers) -------------------------
-
-int x10_dlpack_wrap_host_copy(
-    const void *data, size_t nbytes,
-    const int64_t *shape, int ndim,
-    int32_t code, int32_t bits, int32_t lanes,
-    int32_t device_type, int32_t device_id,
-    x10_dl_capsule_t *out_cap)
+int x10_dlpack_data_ptr(x10_dl_capsule_t cap, void **out_ptr, size_t *out_byte_offset)
 {
-  (void)data;
-  (void)nbytes;
-  (void)shape;
-  (void)ndim;
-  (void)code;
-  (void)bits;
-  (void)lanes;
-  (void)device_type;
-  (void)device_id;
-  (void)out_cap;
-  set_last_error("compiled without DLPack headers");
-  return 0;
+  set_last_error("");
+  if (!cap || !cap->mt || !out_ptr)
+  {
+    set_last_error("null arg");
+    return 0;
+  }
+  const DLTensor *t = &cap->mt->dl_tensor;
+  *out_ptr = (void *)((char *)t->data + t->byte_offset);
+  if (out_byte_offset)
+    *out_byte_offset = (size_t)t->byte_offset;
+  return 1;
+}
+
+// Optional utility used by Swift for copying out
+static size_t x10_dlpack_nbytes(const DLTensor *t)
+{
+  if (!t || t->ndim <= 0)
+    return 0;
+  size_t elems = 1;
+  for (int i = 0; i < t->ndim; ++i)
+    elems *= (size_t)t->shape[i];
+  size_t bytes_per_lane = (size_t)(t->dtype.bits / 8u);
+  size_t lanes = (size_t)(t->dtype.lanes ? t->dtype.lanes : 1);
+  return elems * bytes_per_lane * lanes;
 }
 
 int x10_dlpack_to_host_copy(
-    x10_dl_capsule_t cap, void *dst, size_t dst_size, size_t *written)
+    x10_dl_capsule_t cap,
+    void *out, size_t out_capacity,
+    int *out_written)
 {
-  (void)cap;
-  (void)dst;
-  (void)dst_size;
-  if (written)
-    *written = 0;
-  set_last_error("compiled without DLPack headers");
-  return 0;
+  set_last_error("");
+  if (!cap || !cap->mt)
+  {
+    set_last_error("null cap");
+    return 0;
+  }
+  const DLTensor *t = &cap->mt->dl_tensor;
+  size_t need = x10_dlpack_nbytes(t);
+  if (out_written)
+    *out_written = (int)need;
+  if (!out || out_capacity == 0)
+    return 1; // probe mode
+  if (out_capacity < need)
+  {
+    set_last_error("buffer too small");
+    return 0;
+  }
+  memcpy(out, (const char *)t->data + t->byte_offset, need);
+  return 1;
 }
-
-#endif

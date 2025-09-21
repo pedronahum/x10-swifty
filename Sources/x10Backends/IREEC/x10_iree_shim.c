@@ -80,3 +80,27 @@ int x10_iree_execute_vmfb(
   return 0;
 #endif
 }
+
+int x10_iree_execute_vmfb_bytes(
+    const void *vmfb_data, size_t vmfb_size,
+    const char *entry_function,
+    int32_t device_ordinal)
+{
+  (void)vmfb_data;
+  (void)vmfb_size;
+  (void)entry_function;
+  (void)device_ordinal;
+#if defined(X10_IREE_HAVE_HEADERS)
+  // TODO(real): wire IREE runtime C API:
+  // - iree_vm_instance_create
+  // - iree_hal_driver/device create (local-task or llvm-cpu)
+  // - iree_vm_module_create with vmfb bytes
+  // - resolve entry function, marshal inputs/outputs
+  // - call iree_vm_invoke
+  set_last_error("x10_iree_execute_vmfb_bytes not implemented yet");
+  return 0;
+#else
+  set_last_error("compiled without IREE headers");
+  return 0;
+#endif
+}

@@ -9,12 +9,16 @@ let package = Package(
   products: [
     .library(name: "x10Core", targets: ["x10Core"]),
     .library(name: "x10Runtime", targets: ["x10Runtime"]),
+    .library(name: "x10BackendsSelect", targets: ["x10BackendsSelect"]),
+    .library(name: "x10InteropDLPackC", targets: ["x10InteropDLPackC"]),
     .library(name: "x10InteropDLPack", targets: ["x10InteropDLPack"]),
     .library(name: "x10BackendsPJRT", targets: ["x10BackendsPJRT"]),
     .library(name: "x10BackendsIREE", targets: ["x10BackendsIREE"]),
     .library(name: "x10Diagnostics", targets: ["x10Diagnostics"]),
     .library(name: "x10AdaptersTFEager", targets: ["x10AdaptersTFEager"]),
-    .executable(name: "x10ExampleBasics", targets: ["x10ExampleBasics"])
+    .executable(name: "x10ExampleBasics", targets: ["x10ExampleBasics"]),
+    .executable(name: "x10ExampleIREEAdd", targets: ["x10ExampleIREEAdd"]),
+
   ],
   dependencies: [
     // Macro package intentionally omitted in the bootstrap to avoid toolchain pinning.
@@ -37,13 +41,32 @@ let package = Package(
         .linkedLibrary("dl", .when(platforms: [.linux])) // needed for dlopen on Linux
       ]
     ),
+
+     .target(
+      name: "x10InteropDLPackC",
+      path: "Sources/x10InteropDLPackC",
+      sources: ["x10_dlpack_shim.c"],   
+      publicHeadersPath: "include",
+      cSettings: [
+        .define("X10_HAVE_DLPACK_HEADERS"),                             // <— turn real DLPack on
+        .headerSearchPath("include/third_party/dlpack/include")         // <— adjust if needed
+      ]
+    ),
+
+     // Swift wrapper
+    .target(
+      name: "x10InteropDLPack",
+      dependencies: ["x10Core", "x10InteropDLPackC"],
+      path: "Sources/x10InteropDLPack"
+    ),
+
     .target(
       name: "x10Runtime",
       dependencies: ["x10Core", "x10Diagnostics"],
       path: "Sources/x10Runtime"),
     .target(
       name: "x10BackendsPJRT",
-      dependencies: ["x10Core", "x10Runtime", "PJRTC"],   // ← add PJRTC here
+      dependencies: ["x10Core", "x10Runtime", "PJRTC", "x10InteropDLPack"],
       path: "Sources/x10Backends/PJRT"
     ),
 
@@ -55,15 +78,22 @@ let package = Package(
       publicHeadersPath: "include",
       cSettings: [
         // Enable later when you have IREE headers on the include path:
-        // .define("X10_IREE_HAVE_HEADERS"),
-        // .headerSearchPath("include/third_party/iree/install/include")
+        .define("X10_IREE_HAVE_HEADERS"),
+        .headerSearchPath("include/third_party/iree")
       ]
     ),
       // Swift wrapper
     .target(
       name: "x10BackendsIREE",
-      dependencies: ["x10Core", "x10Runtime", "X10IREEC"],
+      dependencies: ["x10Core", "x10Runtime", "X10IREEC", "x10InteropDLPackC"],
       path: "Sources/x10Backends/IREE"),
+
+    .target(
+      name: "x10BackendsSelect",
+      dependencies: ["x10Core", "x10Runtime", "x10BackendsPJRT", "x10BackendsIREE"],
+      path: "Sources/x10BackendsSelect"
+    ),
+
     .target(
       name: "x10Diagnostics",
       dependencies: ["x10Core"],
@@ -98,6 +128,7 @@ let package = Package(
         "x10Runtime",
         "x10BackendsPJRT",
         "x10BackendsIREE",
+        "x10BackendsSelect",
         .product(name: "Testing", package: "swift-testing"),
       ],
       path: "Tests/x10BackendsTests"
@@ -116,24 +147,10 @@ let package = Package(
       dependencies: ["x10BackendsPJRT"],
       path: "Examples/03-pjrt-devices"
     ),
-    // C shim (guarded)
-    .target(
-      name: "X10DLPACKC",
-      path: "Sources/x10InteropDLPackC",
-      sources: ["x10_dlpack_shim.c"],   
-      publicHeadersPath: "include",
-      cSettings: [
-        .define("X10_HAVE_DLPACK_HEADERS"),                             // <— turn real DLPack on
-        .headerSearchPath("include/third_party/dlpack/include")         // <— adjust if needed
-      ]
-    ),
+    
+   
 
-    // Swift wrapper
-    .target(
-      name: "x10InteropDLPack",
-      dependencies: ["x10Core", "X10DLPACKC"],
-      path: "Sources/x10InteropDLPack"
-    ),
+   
 
     // Optional tests (see file below)
     .testTarget(
@@ -144,6 +161,18 @@ let package = Package(
       ],
       path: "Tests/x10InteropDLPackTests"
     ),
+
+    .executableTarget(
+      name: "x10ExampleIREEAdd",
+      dependencies: [
+        "x10Core",
+        "x10Runtime",
+        "x10BackendsIREE",
+        "x10BackendsSelect"
+      ],
+      path: "Examples/IREEAdd"
+    ),
+
 
 
   ]

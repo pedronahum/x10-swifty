@@ -2,6 +2,7 @@ import Foundation
 import x10Core
 import x10Runtime
 import PJRTC
+import x10InteropDLPack   // NEW
 
 public struct PJRTBackend: Backend {
   public struct Dev: Hashable, Sendable {
@@ -15,6 +16,16 @@ public struct PJRTBackend: Backend {
     switch d {
     case .cpu(let n): return Int32(n)
     case .gpu(let n): return Int32(n)
+    }
+  }
+
+  // Helpers
+  @inline(__always) fileprivate func _byteCount(of dtype: DType) -> Int {
+    switch dtype {
+    case .f16, .bf16: return 2
+    case .f32, .i32:  return 4
+    case .i64:        return 8
+    case .f64:        return 8
     }
   }
 
@@ -41,9 +52,21 @@ public struct PJRTBackend: Backend {
       switch b.storage {
       case .stub(let data):
         return Array(data)
-      case .handle:
-        // TODO(when real PJRT buffers are plumbed): map/transfer from device
-        return []
+      case .dlcap(let cap):
+        // Copy out via shim (still zero-copy alias internally; copy only for host inspection)
+        let n = _numElements(b.shape) * _byteCount(of: b.dtype)
+        var out = Data(count: n)
+        var written32: Int32 = 0
+        let ok = out.withUnsafeMutableBytes { mb -> Int32 in
+          x10_dlpack_to_host_copy(cap.raw, mb.baseAddress, mb.count, &written32)
+        }
+        guard ok == 1, Int(written32) == n else {
+          return Array(out.prefix(max(0, Int(written32))))
+        }
+        return Array(out)
+
+      case .handle(_):
+        return [] // not implemented yet
       }
     }
     return []
