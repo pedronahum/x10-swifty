@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 import x10Core
 import Darwin
 import x10Runtime
