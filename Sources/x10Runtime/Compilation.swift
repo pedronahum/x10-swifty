@@ -5,8 +5,13 @@ import x10Core
 import x10Diagnostics
 
 public struct BackendVersionInfo {
-  let kind: String
-  let version: String
+  public let kind: String
+  public let version: String
+
+  public init(kind: String, version: String) {
+    self.kind = kind
+    self.version = version
+  }
 }
 
 public enum BackendVersioning {

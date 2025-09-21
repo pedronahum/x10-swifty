@@ -10,7 +10,7 @@ public struct CachePolicy: Sendable {
     self.maxBytes = max(1, maxBytes)
   }
 
-  static func fromEnvironment(_ env: [String: String]) -> CachePolicy {
+  public static func fromEnvironment(_ env: [String: String]) -> CachePolicy {
     let defaultEntries = 256
     let defaultBytes = 64 * 1024 * 1024
     let rawEntries = env["X10_CACHE_MAX_ENTRIES"].flatMap(Int.init)
