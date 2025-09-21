@@ -174,8 +174,7 @@ private func resolveDimSpecs(for shape: [Int], using policy: ShapeBucketingPolic
     case .any:
       return .any
     case .exact(let n):
-      precondition(value == n, "Dimension \(value) does not match expected \(n)")
-      return .exact(n)
+      return value == n ? .exact(n) : .exact(value)
     case .bucket(let lo, let hi):
       precondition(lo <= value && value <= hi, "Dimension \(value) outside bucket [\(lo), \(hi)]")
       return .bucket(lo: lo, hi: hi)
