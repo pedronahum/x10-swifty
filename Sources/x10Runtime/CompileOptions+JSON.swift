@@ -36,6 +36,21 @@ extension CompileOptions {
     parts.append(" \"debugIR\":\(debugIR ? "true" : "false")")
     parts.append(" \"enableProfiling\":\(enableProfiling ? "true" : "false")")
 
+    if !shapeBucketing.dims.isEmpty {
+      func encode(_ spec: DimSpec) -> String {
+        switch spec {
+        case .exact(let value):
+          return "{\"type\":\"exact\",\"value\":\(value)}"
+        case .any:
+          return "{\"type\":\"any\"}"
+        case .bucket(let lo, let hi):
+          return "{\"type\":\"bucket\",\"lo\":\(lo),\"hi\":\(hi)}"
+        }
+      }
+      let encoded = shapeBucketing.dims.map(encode).joined(separator: ",")
+      parts.append(" \"shapeBucketing\":[\(encoded)]")
+    }
+
     if !flags.isEmpty {
       let sorted = flags.sorted { $0.key < $1.key }
       let inner = sorted.map { "\"\(esc($0.key))\":\"\(esc($0.value))\"" }.joined(separator: ",")

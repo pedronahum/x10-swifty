@@ -59,8 +59,31 @@ public enum JIT {
     var opts = options
     if opts.device == nil { opts.device = DeviceScope.current }
 
-    // Key the cache by IR+options+device.
-    let key = makeCacheKey(stablehlo, backend: backend, options: opts)
+    // Key the cache by IR+options+device/bucketing.
+    let info = BackendVersioning.info(for: backend)
+    let backendKey = info.kind
+    let packageVer = "dev"
+    let versionSalt = "\(info.kind):\(info.version):\(packageVer)"
+
+    let deviceKey = opts.device?.stableKey ?? "cpu:0"
+    let precisionSignature = "a:\(precCode(opts.precision.activations))," +
+                             "m:\(precCode(opts.precision.matmul))," +
+                             "acc:\(precCode(opts.precision.accumulators))"
+    let flagStr = opts.flags
+      .sorted { $0.key < $1.key }
+      .map { "\($0.key)=\($0.value)" }
+      .joined(separator: ";")
+
+    let concreteShape = canonicalConcreteShape(from: stablehlo)
+    let key = makeCacheKey(
+      module: stablehlo,
+      backendKey: backendKey,
+      deviceKey: deviceKey,
+      versionSalt: versionSalt,
+      concreteShape: concreteShape,
+      bucketing: opts.shapeBucketing,
+      extraComponents: ["precision=\(precisionSignature)", "flags=\(flagStr)"]
+    )
 
     if let hit = await ExecutableCache.shared.get(key) {
       return hit
@@ -73,46 +96,6 @@ public enum JIT {
   }
 
   // MARK: - Private helpers (kept inside the JIT type)
-
-  /// Builds a stable cache key from the IR and options, then hashes it.
-  private static func makeCacheKey<B: Backend>(
-    _ module: StableHLOModule,
-    backend: B,
-    options: CompileOptions
-  ) -> ShapeKey {
-    // IR as printed today (tests already rely on textual() output elsewhere).
-    let ir = module.textual()
-
-    // Device identity (e.g., "cpu:0"/"gpu:0"), see Device+StableKey.swift.
-    let deviceKey = options.device?.stableKey ?? "cpu:0"
-
-    // Precision policy as terse triplet.
-    let prec = "a:\(precCode(options.precision.activations))," +
-               "m:\(precCode(options.precision.matmul))," +
-               "acc:\(precCode(options.precision.accumulators))"
-
-    // Flags stabilized by sorting keys.
-    let flagStr = options.flags
-      .sorted { $0.key < $1.key }
-      .map { "\($0.key)=\($0.value)" }
-      .joined(separator: ";")
-
-    // Compose a single string and hash it for a compact fingerprint.
-    let composed = [
-      "backend=\(String(describing: type(of: backend)))",
-      "device=\(deviceKey)",
-      "precision=\(prec)",
-      "flags=\(flagStr)",
-      "ir={\(ir)}"
-    ].joined(separator: "|")
-
-    let info = BackendVersioning.info(for: backend)
-    let packageVer = "dev"
-    let versionSalt = "\(info.kind):\(info.version):\(packageVer)"
-
-    let fp = fnv1a64(composed)
-    return ShapeKey(fingerprint: fp, versionSalt: versionSalt)
-  }
 
   /// Maps precision enums to short string codes used in the key.
   private static func precCode(_ p: PrecisionPolicy.Precision) -> String {
@@ -137,4 +120,88 @@ private func fnv1a64(_ s: String) -> String {
   }
   // 16 hex chars; sufficient for a cache key fingerprint.
   return String(format: "%016llx", hash)
+}
+
+private func canonicalConcreteShape(from module: StableHLOModule) -> [Int] {
+  guard let fn = module.functions.first else { return [] }
+  if let arg = fn.args.first {
+    return arg.shape.map { $0 ?? 0 }
+  }
+  if let result = fn.results.first {
+    return result.shape.map { $0 ?? 0 }
+  }
+  return []
+}
+
+public func makeCacheKey(
+  module: StableHLOModule,
+  backendKey: String,
+  deviceKey: String,
+  versionSalt: String,
+  concreteShape: [Int],
+  bucketing: ShapeBucketingPolicy,
+  extraComponents: [String] = []
+) -> ShapeKey {
+  let dimSpecs = resolveDimSpecs(for: concreteShape, using: bucketing)
+  let dimSummary = dimSpecs.map(describeDimSpec).joined(separator: ",")
+
+  var components: [String] = [
+    "backend=\(backendKey)",
+    "device=\(deviceKey)",
+    "salt=\(versionSalt)",
+    "dims=\(dimSummary)",
+    "ir={\(module.textual())}"
+  ]
+  components.append(contentsOf: extraComponents)
+
+  let fingerprint = fnv1a64(components.joined(separator: "|"))
+  return ShapeKey(
+    fingerprint: fingerprint,
+    versionSalt: versionSalt,
+    dimSpecs: dimSpecs,
+    deviceKey: deviceKey,
+    backendKey: backendKey
+  )
+}
+
+private func resolveDimSpecs(for shape: [Int], using policy: ShapeBucketingPolicy) -> [DimSpec] {
+  if policy.dims.isEmpty {
+    return inferredDimSpecs(for: shape)
+  }
+  precondition(policy.dims.count == shape.count, "Shape bucketing policy rank mismatch")
+  return zip(policy.dims, shape).map { spec, value in
+    switch spec {
+    case .any:
+      return .any
+    case .exact(let n):
+      precondition(value == n, "Dimension \(value) does not match expected \(n)")
+      return .exact(n)
+    case .bucket(let lo, let hi):
+      precondition(lo <= value && value <= hi, "Dimension \(value) outside bucket [\(lo), \(hi)]")
+      return .bucket(lo: lo, hi: hi)
+    }
+  }
+}
+
+private func inferredDimSpecs(for shape: [Int]) -> [DimSpec] {
+  guard !shape.isEmpty else { return [] }
+  if shape.count <= 2 {
+    return shape.map { .exact($0) }
+  }
+  return shape.map { value in
+    let lo = max(0, (value / 64) * 64)
+    let hi = max(lo, ((value + 63) / 64) * 64)
+    return .bucket(lo: lo, hi: hi)
+  }
+}
+
+private func describeDimSpec(_ spec: DimSpec) -> String {
+  switch spec {
+  case .exact(let n):
+    return "exact: \(n)"
+  case .any:
+    return "any"
+  case .bucket(let lo, let hi):
+    return "bucket:[\(lo),\(hi)]"
+  }
 }

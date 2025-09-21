@@ -25,6 +25,9 @@ public struct CompileOptions: Sendable {
   /// Numeric precision policy (activations / matmul / accumulators).
   public var precision: PrecisionPolicy
 
+  /// Shape bucketing behavior used when deriving cache keys.
+  public var shapeBucketing: ShapeBucketingPolicy
+
   /// Emit IR/text dumps useful for debugging.
   public var debugIR: Bool
 
@@ -37,12 +40,14 @@ public struct CompileOptions: Sendable {
   public init(
     device: Device? = nil,
     precision: PrecisionPolicy = .init(),
+    shapeBucketing: ShapeBucketingPolicy = .default,
     debugIR: Bool = false,
     enableProfiling: Bool = false,
     flags: [String: String] = [:]
   ) {
     self.device = device
     self.precision = precision
+    self.shapeBucketing = shapeBucketing
     self.debugIR = debugIR
     self.enableProfiling = enableProfiling
     self.flags = flags
